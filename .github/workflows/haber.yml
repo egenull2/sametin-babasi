@@ -45,7 +45,7 @@ jobs:
       # DİKKAT: Script adının 'haber_otomaston.py' olduğunu varsayıyoruz. 
       # Eğer dosya adın farklıysa, aşağıdaki satırı güncellemelisin.
       - name: Run Automation Script
-        run: python haber_otomaston.py
+        run: python haber.py
 
       # 5. Adım: Oluşturulan/güncellenen .json dosyalarını repository'e kaydeder (commit & push).
       # Bu adım, işlenen haberlerin kaydını tutmak için kritik öneme sahiptir.
