@@ -1,0 +1,63 @@
+# Haber Otomasyonu Workflow Dosyası
+name: Haber Otomasyonu
+
+# Bu workflow'u tetikleyecek olaylar
+on:
+  # Her saatin başında (xx:00) otomatik olarak çalıştırır.
+  schedule:
+    - cron: '0 * * * *'
+  
+  # GitHub Actions arayüzünden manuel olarak başlatma imkanı sağlar.
+  workflow_dispatch:
+
+# Workflow'un çalıştıracağı işler
+jobs:
+  run-automation:
+    # İşin çalışacağı sanal makine ortamı
+    runs-on: ubuntu-latest
+    
+    # Bu işin, repository'nin içeriğine yazma izni olması gerektiğini belirtir.
+    # Bu izin, scriptin işlediği haberlerin linklerini kaydettiği .json dosyalarını
+    # güncellemesi ve bir sonraki çalışmada aynı haberi tekrar işlememesi için gereklidir.
+    permissions:
+      contents: write
+
+    # İşin adımları
+    steps:
+      # 1. Adım: Repository'deki kodları sanal makineye çeker (checkout).
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Adım: Belirtilen Python sürümünü kurar.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. Adım: Python scriptinin ihtiyaç duyduğu kütüphaneleri kurar.
+      # Scriptin 'lxml' parser'ını kullandığı için lxml'i de ekliyoruz.
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 google-generativeai lxml
+
+      # 4. Adım: Python scriptini çalıştırır.
+      # DİKKAT: Script adının 'haber_otomaston.py' olduğunu varsayıyoruz. 
+      # Eğer dosya adın farklıysa, aşağıdaki satırı güncellemelisin.
+      - name: Run Automation Script
+        run: python haber_otomaston.py
+
+      # 5. Adım: Oluşturulan/güncellenen .json dosyalarını repository'e kaydeder (commit & push).
+      # Bu adım, işlenen haberlerin kaydını tutmak için kritik öneme sahiptir.
+      - name: Commit and push updated data files
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # Sadece .json dosyalarında değişiklik varsa commit at
+          if [[ -n $(git status -s -- *.json) ]]; then
+            git add *.json
+            git commit -m "Veri: İşlenen haberlerin listesini güncelle"
+            git push
+          else
+            echo "İşlenen haber verilerinde değişiklik yok. Commit atlanıyor."
+          fi
