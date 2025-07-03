@@ -9,26 +9,32 @@ import traceback
 import time
 import google.generativeai as genai
 
-# --- YAPILANDIRMA (LÜTFEN BU ALANLARI DOLDURUN) ---
+# --- YAPILANDIRMA ---
 
-# 1. Gemini API Anahtarı
-# Google AI Studio'dan aldığınız API anahtarınızı buraya yapıştırın.
-GEMINI_API_KEY = "AIzaSyAhWRiGAgtvAG94eoH53F6XyA8f5zlvMUY"
+# 1. Gemini API Anahtarları (Liste olarak tanımlandı)
+# Her sorguda sırayla bu listedeki anahtarlar kullanılacak.
+GEMINI_API_KEYS = [
+    "AIzaSyA8Gu_94qwQEdvE64JiTnYNLJp-VLXPJH4",
+    "AIzaSyAhWRiGAgtvAG94eoH53F6XyA8f5zlvMUY",
+    "AIzaSyDQUHU933YLhG5-Cna_qVvcTsRtHcA9KYc",
+    "AIzaSyDjo01wqdIBfMDEEtKA1vGkwaDfDVcLypE", 
+    "AIzaSyC4mcxrcC6o409-B32iBaEHfTAHzphGskE"
+]
+# Hangi anahtarın kullanılacağını takip etmek için bir sayaç (index)
+gemini_api_key_index = 0
 
 
 # 2. Blog Sitenize POST yapılacak URL
-# Oluşturduğumuz blog_ekle.php dosyasının tam URL'si.
 BLOG_POST_URL = "https://kiyaslasana.com/blog_ekle.php"
 
 # 3. E-posta Ayarları
 SMTP_SERVER = "mail.kiyaslasana.com"
 SMTP_PORT = 587
 EMAIL_ADRESINIZ = "samet@kiyaslasana.com"
-EMAIL_SIFRENIZ = "Galatasaray1!"
+EMAIL_SIFRENIZ = "Galatasaray1!" # Güvenlik için bu bilgiyi GitHub Secrets'a taşıman önerilir.
 ALICI_EMAIL_ADRESI = "egenull0@gmail.com"
 
 # 4. Site İçerik Seçicileri (Selectors)
-# Her site için haber başlığı ve içeriğini çekecek HTML seçicileri.
 SITE_CONFIGS = {
     "Webtekno": {
         "title_selector": "h1[itemprop=\"headline\"]",
@@ -68,7 +74,7 @@ def json_dosyasina_yaz(dosya_yolu, veri):
         json.dump(veri, f, ensure_ascii=False, indent=4)
 
 def mail_gonder(baslik, icerik):
-    if not all([SMTP_SERVER, EMAIL_ADRESINIZ, EMAIL_SIFRENIZ, ALICI_EMAIL_ADRESI]) or "ornek@gmail.com" in EMAIL_ADRESINIZ:
+    if not all([SMTP_SERVER, EMAIL_ADRESINIZ, EMAIL_SIFRENIZ, ALICI_EMAIL_ADRESI]):
         print("\n--- E-POSTA GÖNDERİMİ ATLANDI (Yapılandırma Eksik) ---")
         return
     try:
@@ -128,14 +134,20 @@ def get_article_details(url, site_key):
 
 def generate_blog_post(title, content, site_name):
     """Verilen içerik için Gemini API kullanarak blog yazısı oluşturur."""
-    if not GEMINI_API_KEY or "YOUR_GEMINI_API_KEY" in GEMINI_API_KEY:
-        print("  -> HATA: Gemini API anahtarı ayarlanmamış. Atlanıyor.")
-        return None
+    # Fonksiyonun globaldeki index değişkenini değiştireceğini belirtiyoruz
+    global gemini_api_key_index
 
-    print("  -> İçerik Gemini'ye gönderiliyor...")
+    if not GEMINI_API_KEYS:
+        print("  -> HATA: Gemini API anahtar listesi boş. Atlanıyor.")
+        return None
+    
+    # Sıradaki API anahtarını listeden al
+    current_api_key = GEMINI_API_KEYS[gemini_api_key_index]
+    print(f"  -> İçerik Gemini'ye gönderiliyor (API Anahtarı #{gemini_api_key_index + 1} kullanılıyor)...")
+
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        genai.configure(api_key=current_api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
         
         prompt = f"""
         Orijinal Haber Başlığı: {title}
@@ -158,6 +170,9 @@ def generate_blog_post(title, content, site_name):
 
         response = model.generate_content(prompt)
         
+        # Bir sonraki sorgu için index'i güncelle (listenin sonuna gelince başa döner)
+        gemini_api_key_index = (gemini_api_key_index + 1) % len(GEMINI_API_KEYS)
+
         cleaned_response = response.text.strip().replace("```json", "").replace("```", "").strip()
         
         try:
@@ -174,29 +189,34 @@ def generate_blog_post(title, content, site_name):
             return None
 
     except Exception as e:
+        # Bir sonraki sorgu için index'i burada da güncellemeliyiz ki hatalı anahtar tekrar kullanılmasın.
+        gemini_api_key_index = (gemini_api_key_index + 1) % len(GEMINI_API_KEYS)
+
         if '429' in str(e):
-            print("  -> BİLGİ: Gemini API kullanım limitine ulaşıldı. 1 dakika bekleniyor...")
+            print("  -> BİLGİ: Gemini API kullanım limitine ulaşıldı. 1 dakika bekleniyor ve diğer anahtar denenecek...")
             time.sleep(60)
-            return generate_blog_post(title, content, site_name) # Tekrar dene
+            # Fonksiyonu tekrar çağırmaya gerek yok, bir sonraki haber zaten yeni anahtarı deneyecek.
+            return None 
         print(f"  -> HATA: Gemini API ile iletişimde sorun oluştu: {e}")
         if 'response' in locals():
             print(f"  -> Gemini'den gelen ham yanıt: {response.text}")
         return None
 
-def save_as_draft(article_data):
-    """Oluşturulan yazıyı web sitesine taslak olarak gönderir."""
+def post_to_blog(article_data):
+    """Oluşturulan yazıyı web sitesine YAYINDA olarak gönderir."""
     if not BLOG_POST_URL or "siteniz.com" in BLOG_POST_URL:
         print("  -> HATA: BLOG_POST_URL yapılandırılmamış. Atlanıyor.")
         return False
 
-    print(f"  -> '{article_data['baslik']}' başlıklı yazı taslak olarak siteye gönderiliyor...")
+    print(f"  -> '{article_data['baslik']}' başlıklı yazı YAYINLANMAK üzere siteye gönderiliyor...")
     
     try:
         tags_str = ",".join(article_data.get('etiketler', []))
         payload = {
             'baslik': article_data['baslik'],
             'icerik': article_data['icerik'],
-            'etiketler': tags_str
+            'etiketler': tags_str,
+            'durum': 'yayinda'  # YENİ EKLENDİ: Durumu 'yayinda' olarak gönderiyoruz
         }
 
         response = requests.post(BLOG_POST_URL, data=payload, timeout=30)
@@ -205,7 +225,7 @@ def save_as_draft(article_data):
             try:
                 response_json = response.json()
                 if response_json.get("status") == "success":
-                    print(f"  -> BAŞARILI: Yazı taslak olarak eklendi. (Blog ID: {response_json.get('blog_id')})")
+                    print(f"  -> BAŞARILI: Yazı başarıyla yayınlandı. (Blog ID: {response_json.get('blog_id')})")
                     return True
                 else:
                     print(f"  -> HATA: Web sitesi tarafında bir sorun oluştu: {response_json.get('message')}")
@@ -227,7 +247,7 @@ def save_as_draft(article_data):
 def generic_site_kontrol_et(site_key, url, json_dosyasi, list_selector, link_selector, title_selector=None, url_prefix=""):
     """Tüm siteler için jenerik kontrol fonksiyonu."""
     print(f"\n{site_key} kontrol ediliyor...")
-    time.sleep(10) # Site kontrolü öncesi 10 saniye bekle
+    time.sleep(10) 
     
     processed_links_data = json_dosyasini_oku(json_dosyasi)
     eski_haber_linkleri = [haber['link'] for haber in processed_links_data]
@@ -259,7 +279,6 @@ def generic_site_kontrol_et(site_key, url, json_dosyasi, list_selector, link_sel
                 if not link.startswith('http'):
                     link = (url_prefix or url).rstrip('/') + link
                 
-                # Kategori ve galeri linklerini atla
                 if "galeri" in link or (site_key == "Webtekno" and not link.endswith(".html")):
                      continue
 
@@ -296,12 +315,13 @@ def generic_site_kontrol_et(site_key, url, json_dosyasi, list_selector, link_sel
         if not article_data:
             continue
 
-        success = save_as_draft(article_data)
+        # Fonksiyon adı güncellendi
+        success = post_to_blog(article_data)
         if success:
             basariyla_islenenler.append(haber)
             processed_links_data.append(haber)
 
-    time.sleep(5)  # Her haber sonrası 5 saniye bekle
+        time.sleep(5)
 
     json_dosyasina_yaz(json_dosyasi, processed_links_data)
     print(f"-> {site_key} kontrolü tamamlandı. Bir sonraki siteye geçmeden önce 10 saniye bekleniyor...")
@@ -362,14 +382,14 @@ if __name__ == "__main__":
 
     print("\n" + "="*40)
     if tum_basarili_haberler:
-        mail_basligi = "Otomasyon Raporu: Yeni Blog Taslakları Eklendi"
-        mail_icerigi = "Aşağıdaki haberler başarıyla işlenerek sitenize taslak olarak eklendi:\n\n"
+        mail_basligi = "Otomasyon Raporu: Yeni Blog Yazıları Yayınlandı"
+        mail_icerigi = "Aşağıdaki haberler başarıyla işlenerek sitenizde doğrudan YAYINLANDI:\n\n"
         for site, haberler in tum_basarili_haberler.items():
             mail_icerigi += f"--- {site} ---\n"
             for haber in haberler:
                 mail_icerigi += f"- {haber['baslik']}\n  Orijinal Link: {haber['link']}\n"
             mail_icerigi += "\n"
-        mail_icerigi += "Lütfen admin panelinize giderek yazıları kontrol edin, kapak görsellerini ekleyin ve yayınlayın."
+        mail_icerigi += "Lütfen admin panelinize giderek yazıları kontrol edin."
         
         print("\n--- Gönderilecek Mail İçeriği ---\n")
         print(mail_icerigi)
